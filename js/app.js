@@ -58,10 +58,10 @@
   $('login-form').onsubmit = (e) => {
     e.preventDefault();
     guard(async () => {
-      const name = $('login-username').value.trim().toLowerCase();
-      const list = await Api.users.list();
-      const found = list.find((u) => (u.userName || '').toLowerCase() === name);
-      if (!found) throw new Error('Usuario no encontrado');
+      const name = $('login-username').value.trim();
+      const response = await fetch(`http://localhost:8080/api/v1/users/byusername/${name}`);
+      if (!response.ok) throw new Error('Usuario no encontrado');
+      const found = await response.json();
       startSession(found);
     });
   };
@@ -178,23 +178,56 @@
     list.textContent = '';
     const shown = tasks.filter((t) => !filter || t.status === filter);
     if (!shown.length) { list.append(el('div', { class: 'empty' }, 'No hay tareas')); return; }
+
     shown.forEach((t) => {
       const select = el('select', { 'aria-label': 'Cambiar estado' },
-        Object.entries(STATUS_LABEL).map(([v, l]) => el('option', { value: v }, l)));
+          Object.entries(STATUS_LABEL).map(([v, l]) => el('option', { value: v }, l)));
       select.value = t.status;
       select.onchange = () => guard(async () => {
         await Api.tasks.update(targetUserId(), t.id, { status: select.value });
         await loadTasks();
       });
-      list.append(el('article', { class: 'card task ' + t.status },
-        el('div', { class: 'row' }, el('span', { class: 'badge ' + t.status }, STATUS_LABEL[t.status] || t.status),
-          el('span', { class: 'meta' }, '#' + t.id)),
-        el('p', {}, t.description || ''),
-        el('div', { class: 'meta' }, 'Límite: ' + (t.deadline || '-') + ' · Creada: ' + fmtDate(t.createdAt)),
-        select,
-        el('div', { class: 'row' },
+
+      // Definir el siguiente estado para el botón "Avanzar"
+      let nextStatus = null;
+      if (t.status === 'PENDING') {
+        nextStatus = 'INPROGRESS';
+      } else if (t.status === 'INPROGRESS') {
+        nextStatus = 'DONE';
+      }
+
+      // Crear los elementos de acciones de manera limpia
+      const actionsChildren = [];
+
+      // Solo agregamos el botón Avanzar si existe un siguiente estado válido
+      if (nextStatus) {
+        actionsChildren.push(
+            el('button', {
+              class: 'btn ghost small',
+              onclick: () => guard(async () => {
+                await Api.tasks.update(targetUserId(), t.id, { status: nextStatus });
+                toast('Estado de tarea actualizado');
+                await loadTasks();
+              })
+            }, 'Avanzar')
+        );
+      }
+
+      // Agregar los botones de Editar y Eliminar
+      actionsChildren.push(
           el('button', { class: 'btn ghost small', onclick: () => openTaskDialog(t) }, 'Editar'),
-          el('button', { class: 'btn danger small', onclick: () => deleteTask(t) }, 'Eliminar'))));
+          el('button', { class: 'btn danger small', onclick: () => deleteTask(t) }, 'Eliminar')
+      );
+
+      const actionsRow = el('div', { class: 'row' }, ...actionsChildren);
+
+      list.append(el('article', { class: 'card task ' + t.status },
+          el('div', { class: 'row' }, el('span', { class: 'badge ' + t.status }, STATUS_LABEL[t.status] || t.status),
+              el('span', { class: 'meta' }, '#' + t.id)),
+          el('p', {}, t.description || ''),
+          el('div', { class: 'meta' }, 'Límite: ' + (t.deadline || '-') + ' · Creada: ' + fmtDate(t.createdAt)),
+          select,
+          actionsRow));
     });
   }
 
